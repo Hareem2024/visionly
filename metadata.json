@@ -1,0 +1,7 @@
+{
+  "name": "Dreamscape: Lofi 3D Vision Boards",
+  "description": "A cozy, lofi-aesthetic platform to build and share 3D-inspired vision boards. Generate images for your dreams using Gemini and collaborate with friends.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
