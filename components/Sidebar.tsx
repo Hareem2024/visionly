@@ -663,8 +663,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                 style={{ touchAction: 'manipulation' }}
               >
                 <p className="text-sm text-gray-400 italic">drag me to board</p>
-              </div>
-            </div>
           </div>
         </div>
       </div>
