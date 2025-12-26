@@ -662,11 +662,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                 className="p-3 rounded-lg bg-white/60 border-2 border-dashed border-gray-300 cursor-grab active:cursor-grabbing hover:border-blue-400 hover:bg-white transition-all text-center"
                 style={{ touchAction: 'manipulation' }}
               >
-                  e.dataTransfer.effectAllowed = 'copy';
-                }}
-                className="p-3 rounded-lg bg-white/60 border-2 border-dashed border-gray-300 cursor-grab active:cursor-grabbing hover:border-blue-400 hover:bg-white transition-all text-center"
-              >
                 <p className="text-sm text-gray-400 italic">drag me to board</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
