@@ -513,10 +513,41 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
     } else if (dataType === 'sticker' && onDropSticker && data) {
       onDropSticker(data, dropX - 30, dropY - 30);
     } else if (dataType === 'note' && onDropNote && data) {
-      const noteData = JSON.parse(data);
-      onDropNote(noteData.text || 'write here...', noteData.color || 'default', dropX - 110, dropY - 40);
+      try {
+        const noteData = JSON.parse(data);
+        onDropNote(
+          noteData.text || 'write here...', 
+          noteData.color || 'default', 
+          noteData.font, 
+          noteData.fontWeight, 
+          noteData.letterSpacing, 
+          noteData.isItalic, 
+          noteData.isUnderline, 
+          noteData.textColor, 
+          dropX - 110, 
+          dropY - 40
+        );
+      } catch (e) {
+        // Fallback for old format
+        onDropNote(data || 'write here...', 'default', undefined, undefined, undefined, false, false, undefined, dropX - 110, dropY - 40);
+      }
     } else if (dataType === 'text' && onDropText && data) {
-      onDropText(data || 'text', dropX - 100, dropY - 15);
+      try {
+        const textData = JSON.parse(data);
+        onDropText(
+          textData.text || 'text', 
+          textData.font, 
+          textData.fontWeight, 
+          textData.isItalic, 
+          textData.isUnderline, 
+          textData.textColor, 
+          dropX - 100, 
+          dropY - 15
+        );
+      } catch (e) {
+        // Fallback for old format
+        onDropText(data || 'text', undefined, undefined, false, false, undefined, dropX - 100, dropY - 15);
+      }
     }
     
     setIsDraggingFromSidebar(false);
