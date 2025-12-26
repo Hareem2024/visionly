@@ -133,6 +133,7 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
   const [resizingItem, setResizingItem] = useState<string | null>(null);
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0 });
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const [selectedItem, setSelectedItem] = useState<string | null>(null); // For touch devices - keeps controls visible
   const [isDraggingFromSidebar, setIsDraggingFromSidebar] = useState(false);
   const [pendingTouchItem, setPendingTouchItem] = useState<{ type: string; data: any } | null>(null);
   
@@ -181,6 +182,9 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
     // Store touch start info to detect if it's a tap or drag
     setTouchStartTime(Date.now());
     setTouchStartPos({ x: touch.clientX, y: touch.clientY });
+    
+    // Select the item on touch (for showing controls on touch devices)
+    setSelectedItem(id);
     
     // If we have a pending item from sidebar, place it first
     if (currentPendingTouchItem) {
@@ -439,6 +443,19 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
   const handleTouchEnd = (e: React.TouchEvent) => {
     const touch = e.changedTouches[0];
     
+    // If touch ended on empty space (not on an item), deselect
+    if (touch && !e.target || !(e.target as HTMLElement).closest('[data-item-id]')) {
+      // Only deselect if we're not in the middle of an operation
+      if (!resizingItem && !rotatingItem && !dragItem) {
+        // Small delay to allow tap events to complete
+        setTimeout(() => {
+          if (!resizingItem && !rotatingItem && !dragItem) {
+            setSelectedItem(null);
+          }
+        }, 100);
+      }
+    }
+    
     // If we have a pending item and it was a quick tap, place it
     if (currentPendingTouchItem && touch) {
       const timeDiff = Date.now() - touchStartTime;
@@ -579,7 +596,20 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
         setCurrentPendingTouchItem(null);
         handleTouchEnd(e);
       }}
+      onClick={(e) => {
+        // Deselect item when clicking on empty board area (for touch devices)
+        const target = e.target as HTMLElement;
+        if (target === containerRef.current || (!target.closest('[data-item-id]') && !target.closest('[data-control-handle]'))) {
+          setSelectedItem(null);
+        }
+      }}
       onTouchStart={(e) => {
+        // If touching empty board area, deselect any selected item
+        const target = e.target as HTMLElement;
+        if (!target.closest('[data-item-id]') && !target.closest('[data-control-handle]')) {
+          setSelectedItem(null);
+        }
+        
         // If touching empty board area and we have a pending item, place it
         if (currentPendingTouchItem && e.touches.length === 1 && containerRef.current) {
           const touch = e.touches[0];
@@ -624,6 +654,7 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
             if (el) itemRefs.current.set(item.id, el);
             else itemRefs.current.delete(item.id);
           }}
+          data-item-id={item.id}
           className={`absolute select-none cursor-grab ${dragItem === item.id ? 'cursor-grabbing' : ''} ${rotatingItem === item.id ? 'cursor-grabbing' : ''}`}
           style={{
             left: item.x,
@@ -638,13 +669,21 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
           onTouchStart={(e) => handleTouchStart(item.id, e)}
           onMouseEnter={() => setHoveredItem(item.id)}
           onMouseLeave={() => setHoveredItem(null)}
+          onClick={(e) => {
+            // On touch devices, clicking an item selects it (shows controls)
+            if ('ontouchstart' in window) {
+              e.stopPropagation();
+              setSelectedItem(item.id);
+            }
+          }}
         >
           {/* Image Card */}
           {item.type === 'image' && (
             <div className="relative">
               {/* Rotation Handle - Outside overflow container */}
-              {(hoveredItem === item.id || rotatingItem === item.id) && (
+              {(hoveredItem === item.id || selectedItem === item.id || rotatingItem === item.id) && (
                 <div
+                  data-control-handle="rotate"
                   className="absolute -top-10 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab z-50"
                   onMouseDown={(e) => handleRotateStart(item.id, e)}
                   onTouchStart={(e) => handleRotateStart(item.id, e)}
@@ -662,15 +701,16 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
             <button 
                 onClick={(e) => { e.stopPropagation(); onDeleteItem(item.id); }}
                 className="absolute -top-3 -right-3 w-7 h-7 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg flex items-center justify-center z-50 transition-opacity"
-                style={{ opacity: hoveredItem === item.id ? 1 : 0 }}
+                style={{ opacity: (hoveredItem === item.id || selectedItem === item.id) ? 1 : 0 }}
             >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
             </button>
               {/* Resize Handle - Bottom right corner */}
-              {(hoveredItem === item.id || resizingItem === item.id) && (
+              {(hoveredItem === item.id || selectedItem === item.id || resizingItem === item.id) && (
                 <div
+                  data-control-handle="resize"
                   className="absolute -bottom-3 -right-3 w-7 h-7 bg-green-500 hover:bg-green-600 rounded-full shadow-lg flex items-center justify-center z-50 cursor-se-resize transition-all hover:scale-110"
                   onMouseDown={(e) => handleResizeStart(item.id, e)}
                   onTouchStart={(e) => handleResizeStart(item.id, e)}
@@ -697,8 +737,9 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
           {item.type === 'note' && (
             <div className="relative">
               {/* Rotation Handle for Notes */}
-              {(hoveredItem === item.id || rotatingItem === item.id) && (
+              {(hoveredItem === item.id || selectedItem === item.id || rotatingItem === item.id) && (
                 <div
+                  data-control-handle="rotate"
                   className="absolute -top-10 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab z-50"
                   onMouseDown={(e) => handleRotateStart(item.id, e)}
                   onTouchStart={(e) => handleRotateStart(item.id, e)}
@@ -716,7 +757,7 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
               <button
                 onClick={(e) => { e.stopPropagation(); onDeleteItem(item.id); }}
                 className="absolute -top-3 -right-3 w-7 h-7 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg flex items-center justify-center z-50 transition-opacity"
-                style={{ opacity: hoveredItem === item.id ? 1 : 0 }}
+                style={{ opacity: (hoveredItem === item.id || selectedItem === item.id) ? 1 : 0 }}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
@@ -747,8 +788,9 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
           {item.type === 'text' && (
             <div className={`relative ${dragItem === item.id ? 'opacity-90' : ''}`}>
               {/* Rotation Handle for Text */}
-              {(hoveredItem === item.id || rotatingItem === item.id) && (
+              {(hoveredItem === item.id || selectedItem === item.id || rotatingItem === item.id) && (
                 <div
+                  data-control-handle="rotate"
                   className="absolute -top-10 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab z-50"
                   onMouseDown={(e) => handleRotateStart(item.id, e)}
                   onTouchStart={(e) => handleRotateStart(item.id, e)}
@@ -766,7 +808,7 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
               <button
                 onClick={(e) => { e.stopPropagation(); onDeleteItem(item.id); }}
                 className="absolute -top-3 -right-3 w-7 h-7 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg flex items-center justify-center z-50 transition-opacity"
-                style={{ opacity: hoveredItem === item.id ? 1 : 0 }}
+                style={{ opacity: (hoveredItem === item.id || selectedItem === item.id) ? 1 : 0 }}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
@@ -794,8 +836,9 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
               style={{ width: item.width }}
             >
               {/* Rotation Handle for Stickers */}
-              {(hoveredItem === item.id || rotatingItem === item.id) && (
+              {(hoveredItem === item.id || selectedItem === item.id || rotatingItem === item.id) && (
                 <div
+                  data-control-handle="rotate"
                   className="absolute -top-10 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab z-50"
                   onMouseDown={(e) => handleRotateStart(item.id, e)}
                   onTouchStart={(e) => handleRotateStart(item.id, e)}
@@ -813,15 +856,16 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
               <button
                 onClick={(e) => { e.stopPropagation(); onDeleteItem(item.id); }}
                 className="absolute -top-3 -right-3 w-7 h-7 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg flex items-center justify-center z-50 transition-opacity"
-                style={{ opacity: hoveredItem === item.id ? 1 : 0 }}
+                style={{ opacity: (hoveredItem === item.id || selectedItem === item.id) ? 1 : 0 }}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
               {/* Resize Handle for Stickers */}
-              {(hoveredItem === item.id || resizingItem === item.id) && (
+              {(hoveredItem === item.id || selectedItem === item.id || resizingItem === item.id) && (
                 <div
+                  data-control-handle="resize"
                   className="absolute -bottom-3 -right-3 w-7 h-7 bg-green-500 hover:bg-green-600 rounded-full shadow-lg flex items-center justify-center z-50 cursor-se-resize transition-all hover:scale-110"
                   onMouseDown={(e) => handleResizeStart(item.id, e)}
                   onTouchStart={(e) => handleResizeStart(item.id, e)}
@@ -853,8 +897,9 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
                 style={{ backgroundColor: 'transparent' }}
               />
               {/* Rotation Handle for Shapes */}
-              {(hoveredItem === item.id || rotatingItem === item.id) && (
+              {(hoveredItem === item.id || selectedItem === item.id || rotatingItem === item.id) && (
                 <div
+                  data-control-handle="rotate"
                   className="absolute -top-10 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab z-50"
                   onMouseDown={(e) => handleRotateStart(item.id, e)}
                   onTouchStart={(e) => handleRotateStart(item.id, e)}
@@ -869,7 +914,7 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
                 </div>
               )}
               {/* Delete Button for Shapes */}
-              {(hoveredItem === item.id) && (
+              {(hoveredItem === item.id || selectedItem === item.id) && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onDeleteItem(item.id); }}
                   className="absolute -top-3 -right-3 w-7 h-7 bg-red-500 hover:bg-red-600 text-white rounded-full shadow-lg flex items-center justify-center z-50"
@@ -880,8 +925,9 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
                 </button>
               )}
               {/* Resize Handle for Shapes */}
-              {(hoveredItem === item.id || resizingItem === item.id) && (
+              {(hoveredItem === item.id || selectedItem === item.id || resizingItem === item.id) && (
                 <div
+                  data-control-handle="resize"
                   className="absolute -bottom-3 -right-3 w-7 h-7 bg-green-500 hover:bg-green-600 rounded-full shadow-lg flex items-center justify-center z-50 cursor-se-resize transition-all hover:scale-110"
                   onMouseDown={(e) => handleResizeStart(item.id, e)}
                   onTouchStart={(e) => handleResizeStart(item.id, e)}
