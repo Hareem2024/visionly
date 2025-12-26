@@ -50,6 +50,8 @@ interface SidebarProps {
   onSaveUpload: (base64: string, fileName: string) => void;
   onDeleteUpload: (uploadId: string) => void;
   onAddUploadToBoard: (uploadData: string) => void;
+  onSetPendingTouchItem?: (item: { type: string; data: any } | null) => void;
+  pendingTouchItem?: { type: string; data: any } | null;
 }
 
 // Shape options
@@ -486,14 +488,37 @@ const Sidebar: React.FC<SidebarProps> = ({
                 draggable
                 onDragStart={(e) => {
                   const noteData = {
-                    text: 'write here...',
-                    color: selectedColor
+                    text: noteText || 'write here...',
+                    color: selectedColor,
+                    font: currentFont?.family,
+                    fontWeight: selectedWeight,
+                    letterSpacing: selectedSpacing,
+                    isItalic: isItalic,
+                    isUnderline: isUnderline,
+                    textColor: selectedTextColor
                   };
                   e.dataTransfer.setData('application/x-item-type', 'note');
                   e.dataTransfer.setData('text/plain', JSON.stringify(noteData));
                   e.dataTransfer.effectAllowed = 'copy';
                 }}
+                onTouchStart={(e) => {
+                  if (onSetPendingTouchItem) {
+                    const noteData = {
+                      text: noteText || 'write here...',
+                      color: selectedColor,
+                      font: currentFont?.family,
+                      fontWeight: selectedWeight,
+                      letterSpacing: selectedSpacing,
+                      isItalic: isItalic,
+                      isUnderline: isUnderline,
+                      textColor: selectedTextColor
+                    };
+                    onSetPendingTouchItem({ type: 'note', data: noteData });
+                    e.preventDefault();
+                  }
+                }}
                 className="p-3 rounded-lg bg-white/60 border-2 border-dashed border-gray-300 cursor-grab active:cursor-grabbing hover:border-blue-400 hover:bg-white transition-all text-center"
+                style={{ touchAction: 'manipulation' }}
               >
                 <div className={`card-item ${getColorClass(selectedColor)} p-3 min-h-[60px] flex items-center justify-center`}>
                   <span className="text-xs text-gray-400 italic">drag me to board</span>
@@ -608,16 +633,43 @@ const Sidebar: React.FC<SidebarProps> = ({
               <div
                 draggable
                 onDragStart={(e) => {
+                  const textData = {
+                    text: headingText || 'text',
+                    font: currentFont?.family,
+                    fontWeight: selectedWeight,
+                    isItalic: isItalic,
+                    isUnderline: isUnderline,
+                    textColor: selectedTextColor
+                  };
                   e.dataTransfer.setData('application/x-item-type', 'text');
-                  e.dataTransfer.setData('text/plain', 'text');
+                  e.dataTransfer.setData('text/plain', JSON.stringify(textData));
+                  e.dataTransfer.effectAllowed = 'copy';
+                }}
+                onTouchStart={(e) => {
+                  if (onSetPendingTouchItem) {
+                    const textData = {
+                      text: headingText || 'text',
+                      font: currentFont?.family,
+                      fontWeight: selectedWeight,
+                      isItalic: isItalic,
+                      isUnderline: isUnderline,
+                      textColor: selectedTextColor
+                    };
+                    onSetPendingTouchItem({ type: 'text', data: textData });
+                    e.preventDefault();
+                  }
+                }}
+                className="p-3 rounded-lg bg-white/60 border-2 border-dashed border-gray-300 cursor-grab active:cursor-grabbing hover:border-blue-400 hover:bg-white transition-all text-center"
+                style={{ touchAction: 'manipulation' }}
+              >
                   e.dataTransfer.effectAllowed = 'copy';
                 }}
                 className="p-3 rounded-lg bg-white/60 border-2 border-dashed border-gray-300 cursor-grab active:cursor-grabbing hover:border-blue-400 hover:bg-white transition-all text-center"
               >
                 <p className="text-sm text-gray-400 italic">drag me to board</p>
-              </div>
-            </div>
           </div>
+        </div>
+      </div>
         )}
 
         {/* Stickers Button */}
@@ -663,8 +715,15 @@ const Sidebar: React.FC<SidebarProps> = ({
                     e.dataTransfer.setData('text/plain', sticker.url);
                     e.dataTransfer.effectAllowed = 'copy';
                   }}
+                  onTouchStart={(e) => {
+                    if (onSetPendingTouchItem) {
+                      onSetPendingTouchItem({ type: 'sticker', data: sticker.url });
+                      e.preventDefault();
+                    }
+                  }}
                   className="aspect-square p-1.5 rounded-lg bg-white/60 hover:bg-white hover:scale-105 transition-all flex items-center justify-center group relative cursor-grab active:cursor-grabbing"
-                  title={`${sticker.name} — drag to board or click to add`}
+                  title={`${sticker.name} — drag to board or tap to place`}
+                  style={{ touchAction: 'manipulation' }}
                 >
                   <img 
                     src={sticker.url} 

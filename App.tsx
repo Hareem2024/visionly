@@ -61,6 +61,7 @@ const App: React.FC = () => {
   const [visionDocLoading, setVisionDocLoading] = useState(false);
   const [visionDocProgress, setVisionDocProgress] = useState(0);
   const [visionDocStatus, setVisionDocStatus] = useState('');
+  const [pendingTouchItem, setPendingTouchItem] = useState<{ type: string; data: any } | null>(null);
   const [vibeName, setVibeName] = useState<string>('');
   const [vibeAffirmation, setVibeAffirmation] = useState<string>('');
   const [isPrivateMode, setIsPrivateMode] = useState(false);
@@ -551,6 +552,8 @@ const App: React.FC = () => {
         onSaveUpload={saveUpload}
         onDeleteUpload={deleteUpload}
         onAddUploadToBoard={addUploadToBoard}
+        onSetPendingTouchItem={setPendingTouchItem}
+        pendingTouchItem={pendingTouchItem}
       />
 
       <main className="flex-1 relative">
@@ -560,15 +563,17 @@ const App: React.FC = () => {
           onDeleteItem={deleteItem}
           onDropImage={addImageToBoard}
           onDropSticker={addStickerToBoard}
-          onDropNote={(text, color, x, y) => {
-            const currentFont = NOTE_FONTS.find(f => f.id === 'inter')?.family;
-            addNoteToBoard(text, color as NoteColor, currentFont, 'regular', 'normal', false, false, undefined, x, y);
+          onDropNote={(text, color, font, fontWeight, letterSpacing, isItalic, isUnderline, textColor, x, y) => {
+            const currentFont = font || NOTE_FONTS.find(f => f.id === 'inter')?.family;
+            addNoteToBoard(text, color as NoteColor, currentFont, fontWeight as any, letterSpacing as any, isItalic, isUnderline, textColor, x, y);
           }}
-          onDropText={(text, x, y) => {
+          onDropText={(text, font, fontWeight, isItalic, isUnderline, textColor, x, y) => {
             const pairing = FONT_PAIRINGS.find(p => p.id === currentFontPairing);
-            addTextToBoard(text, pairing?.heading, 'regular', false, false, undefined, x, y);
+            addTextToBoard(text, font || pairing?.heading, fontWeight as any, isItalic, isUnderline, textColor, x, y);
           }}
           isPrivateMode={isPrivateMode}
+          pendingTouchItem={pendingTouchItem}
+          onSetPendingTouchItem={setPendingTouchItem}
         />
         
         {/* Vibe affirmation toast */}

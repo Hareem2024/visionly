@@ -8,9 +8,11 @@ interface BoardViewProps {
   onDeleteItem: (id: string) => void;
   onDropImage?: (base64: string, x: number, y: number) => void;
   onDropSticker?: (url: string, x: number, y: number) => void;
-  onDropNote?: (text: string, color: string, x: number, y: number) => void;
-  onDropText?: (text: string, x: number, y: number) => void;
+  onDropNote?: (text: string, color: string, font?: string, fontWeight?: string, letterSpacing?: string, isItalic?: boolean, isUnderline?: boolean, textColor?: string, x?: number, y?: number) => void;
+  onDropText?: (text: string, font?: string, fontWeight?: string, isItalic?: boolean, isUnderline?: boolean, textColor?: string, x?: number, y?: number) => void;
   isPrivateMode?: boolean;
+  pendingTouchItem?: { type: string; data: any } | null;
+  onSetPendingTouchItem?: (item: { type: string; data: any } | null) => void;
 }
 
 const getColorClass = (color?: NoteColor): string => {
@@ -120,7 +122,7 @@ const renderShape = (
   }
 };
 
-const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem, onDropImage, onDropSticker, onDropNote, onDropText, isPrivateMode }) => {
+const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem, onDropImage, onDropSticker, onDropNote, onDropText, isPrivateMode, pendingTouchItem: externalPendingTouchItem, onSetPendingTouchItem }) => {
   const [dragItem, setDragItem] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [isOverTrash, setIsOverTrash] = useState(false);
@@ -132,6 +134,13 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0 });
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const [isDraggingFromSidebar, setIsDraggingFromSidebar] = useState(false);
+  const [pendingTouchItem, setPendingTouchItem] = useState<{ type: string; data: any } | null>(null);
+  
+  // Use external pending item if provided, otherwise use internal state
+  const currentPendingTouchItem = externalPendingTouchItem !== undefined ? externalPendingTouchItem : pendingTouchItem;
+  const setCurrentPendingTouchItem = onSetPendingTouchItem || setPendingTouchItem;
+  const [touchStartTime, setTouchStartTime] = useState(0);
+  const [touchStartPos, setTouchStartPos] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const trashRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -155,7 +164,62 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
     onUpdateItem(id, { z: maxZ + 1 });
   };
 
-  const handleRotateStart = (id: string, e: React.MouseEvent) => {
+  const handleTouchStart = (id: string, e: React.TouchEvent) => {
+    // Don't prevent default if we're starting a drag from sidebar
+    if (pendingTouchItem) {
+      e.preventDefault();
+    }
+    
+    const item = items.find(i => i.id === id);
+    if (!item || !containerRef.current || e.touches.length !== 1) return;
+    
+    const touch = e.touches[0];
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const relativeX = touch.clientX - containerRect.left;
+    const relativeY = touch.clientY - containerRect.top;
+    
+    // Store touch start info to detect if it's a tap or drag
+    setTouchStartTime(Date.now());
+    setTouchStartPos({ x: touch.clientX, y: touch.clientY });
+    
+    // If we have a pending item from sidebar, place it first
+    if (currentPendingTouchItem) {
+      e.preventDefault();
+      if (currentPendingTouchItem.type === 'image' && onDropImage) {
+        onDropImage(currentPendingTouchItem.data, relativeX - 100, relativeY - 100);
+      } else if (currentPendingTouchItem.type === 'sticker' && onDropSticker) {
+        onDropSticker(currentPendingTouchItem.data, relativeX - 30, relativeY - 30);
+      } else if (currentPendingTouchItem.type === 'note' && onDropNote) {
+        const noteData = currentPendingTouchItem.data;
+        onDropNote(noteData.text || 'write here...', noteData.color || 'default', noteData.font, noteData.fontWeight, noteData.letterSpacing, noteData.isItalic, noteData.isUnderline, noteData.textColor, relativeX - 110, relativeY - 40);
+      } else if (currentPendingTouchItem.type === 'text' && onDropText) {
+        const textData = currentPendingTouchItem.data;
+        onDropText(textData.text || 'text', textData.font, textData.fontWeight, textData.isItalic, textData.isUnderline, textData.textColor, relativeX - 100, relativeY - 15);
+      }
+      setCurrentPendingTouchItem(null);
+      // Now start dragging the newly placed item
+      setDragItem(id);
+      setDragOffset({
+        x: relativeX - item.x,
+        y: relativeY - item.y
+      });
+      const maxZ = Math.max(...items.map(i => i.z), 0);
+      onUpdateItem(id, { z: maxZ + 1 });
+      return;
+    }
+    
+    e.preventDefault();
+    setDragItem(id);
+    setDragOffset({
+      x: relativeX - item.x,
+      y: relativeY - item.y
+    });
+    
+    const maxZ = Math.max(...items.map(i => i.z), 0);
+    onUpdateItem(id, { z: maxZ + 1 });
+  };
+
+  const handleRotateStart = (id: string, e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const item = items.find(i => i.id === id);
@@ -169,9 +233,15 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
     
-    // Calculate initial angle from center to mouse
-    const deltaX = e.clientX - centerX;
-    const deltaY = e.clientY - centerY;
+    // Handle both mouse and touch events
+    const clientX = 'touches' in e ? e.touches[0]?.clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0]?.clientY : e.clientY;
+    
+    if (clientX === undefined || clientY === undefined) return;
+    
+    // Calculate initial angle from center to touch/mouse
+    const deltaX = clientX - centerX;
+    const deltaY = clientY - centerY;
     const angle = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
     
     setRotatingItem(id);
@@ -183,16 +253,22 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
     onUpdateItem(id, { z: maxZ + 1 });
   };
 
-  const handleResizeStart = (id: string, e: React.MouseEvent) => {
+  const handleResizeStart = (id: string, e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const item = items.find(i => i.id === id);
     if (!item) return;
     
+    // Handle both mouse and touch events
+    const clientX = 'touches' in e ? e.touches[0]?.clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0]?.clientY : e.clientY;
+    
+    if (clientX === undefined || clientY === undefined) return;
+    
     setResizingItem(id);
     setResizeStart({
-      x: e.clientX,
-      y: e.clientY,
+      x: clientX,
+      y: clientY,
       width: item.width
     });
     
@@ -257,6 +333,89 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
     setIsOverTrash(checkIfOverTrash(e.clientX, e.clientY));
   };
 
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!containerRef.current || e.touches.length !== 1) {
+      // If we have pending item and multiple touches, cancel it
+      if (currentPendingTouchItem) {
+        setCurrentPendingTouchItem(null);
+      }
+      return;
+    }
+    
+    e.preventDefault();
+    const touch = e.touches[0];
+    
+      // If we have a pending item and user moved significantly, place it
+      if (currentPendingTouchItem) {
+      const moveDistance = Math.sqrt(
+        Math.pow(touch.clientX - touchStartPos.x, 2) + 
+        Math.pow(touch.clientY - touchStartPos.y, 2)
+      );
+      // If moved more than 10px, place the item
+      if (moveDistance > 10) {
+        const containerRect = containerRef.current.getBoundingClientRect();
+        const relativeX = touch.clientX - containerRect.left;
+        const relativeY = touch.clientY - containerRect.top;
+        
+        if (currentPendingTouchItem.type === 'image' && onDropImage) {
+          onDropImage(currentPendingTouchItem.data, relativeX - 100, relativeY - 100);
+        } else if (currentPendingTouchItem.type === 'sticker' && onDropSticker) {
+          onDropSticker(currentPendingTouchItem.data, relativeX - 30, relativeY - 30);
+        } else if (currentPendingTouchItem.type === 'note' && onDropNote) {
+          const noteData = currentPendingTouchItem.data;
+          onDropNote(noteData.text || 'write here...', noteData.color || 'default', noteData.font, noteData.fontWeight, noteData.letterSpacing, noteData.isItalic, noteData.isUnderline, noteData.textColor, relativeX - 110, relativeY - 40);
+        } else if (currentPendingTouchItem.type === 'text' && onDropText) {
+          const textData = currentPendingTouchItem.data;
+          onDropText(textData.text || 'text', textData.font, textData.fontWeight, textData.isItalic, textData.isUnderline, textData.textColor, relativeX - 100, relativeY - 15);
+        }
+        setCurrentPendingTouchItem(null);
+        return;
+      }
+    }
+    
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const relativeX = touch.clientX - containerRect.left;
+    const relativeY = touch.clientY - containerRect.top;
+    
+    // Handle resize
+    if (resizingItem) {
+      const deltaX = touch.clientX - resizeStart.x;
+      const deltaY = touch.clientY - resizeStart.y;
+      // Use the larger of the two deltas for proportional scaling
+      const delta = Math.max(deltaX, deltaY);
+      const newWidth = Math.max(40, Math.min(600, resizeStart.width + delta)); // Min 40px, max 600px
+      
+      onUpdateItem(resizingItem, { width: newWidth });
+      return;
+    }
+    
+    // Handle rotation
+    if (rotatingItem) {
+      // Calculate current angle from center to touch
+      const deltaX = touch.clientX - rotationCenter.x;
+      const deltaY = touch.clientY - rotationCenter.y;
+      const currentAngle = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
+      
+      // Calculate rotation delta and apply to starting rotation
+      const angleDelta = currentAngle - initialAngle;
+      const newRotation = startRotation + angleDelta;
+      
+      onUpdateItem(rotatingItem, { rotation: newRotation });
+      return;
+    }
+    
+    // Handle drag
+    if (!dragItem) return;
+
+    const x = relativeX - dragOffset.x;
+    const y = relativeY - dragOffset.y;
+
+    onUpdateItem(dragItem, { x, y });
+    
+    // Check if hovering over trash
+    setIsOverTrash(checkIfOverTrash(touch.clientX, touch.clientY));
+  };
+
   const handleMouseUp = (e: React.MouseEvent) => {
     if (resizingItem) {
       setResizingItem(null);
@@ -271,6 +430,57 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
     }
     
     if (dragItem && checkIfOverTrash(e.clientX, e.clientY)) {
+      onDeleteItem(dragItem);
+    }
+    setDragItem(null);
+    setIsOverTrash(false);
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const touch = e.changedTouches[0];
+    
+    // If we have a pending item and it was a quick tap, place it
+    if (currentPendingTouchItem && touch) {
+      const timeDiff = Date.now() - touchStartTime;
+      const moveDistance = Math.sqrt(
+        Math.pow(touch.clientX - touchStartPos.x, 2) + 
+        Math.pow(touch.clientY - touchStartPos.y, 2)
+      );
+      
+      // If it was a quick tap (< 300ms) and didn't move much (< 10px), place the item
+      if (timeDiff < 300 && moveDistance < 10 && containerRef.current) {
+        const containerRect = containerRef.current.getBoundingClientRect();
+        const relativeX = touch.clientX - containerRect.left;
+        const relativeY = touch.clientY - containerRect.top;
+        
+        if (currentPendingTouchItem.type === 'image' && onDropImage) {
+          onDropImage(currentPendingTouchItem.data, relativeX - 100, relativeY - 100);
+        } else if (currentPendingTouchItem.type === 'sticker' && onDropSticker) {
+          onDropSticker(currentPendingTouchItem.data, relativeX - 30, relativeY - 30);
+        } else if (currentPendingTouchItem.type === 'note' && onDropNote) {
+          const noteData = currentPendingTouchItem.data;
+          onDropNote(noteData.text || 'write here...', noteData.color || 'default', noteData.font, noteData.fontWeight, noteData.letterSpacing, noteData.isItalic, noteData.isUnderline, noteData.textColor, relativeX - 110, relativeY - 40);
+        } else if (currentPendingTouchItem.type === 'text' && onDropText) {
+          const textData = currentPendingTouchItem.data;
+          onDropText(textData.text || 'text', textData.font, textData.fontWeight, textData.isItalic, textData.isUnderline, textData.textColor, relativeX - 100, relativeY - 15);
+        }
+      }
+      setCurrentPendingTouchItem(null);
+    }
+    
+    if (resizingItem) {
+      setResizingItem(null);
+      return;
+    }
+    
+    if (rotatingItem) {
+      setRotatingItem(null);
+      setInitialAngle(0);
+      setStartRotation(0);
+      return;
+    }
+    
+    if (dragItem && touch && checkIfOverTrash(touch.clientX, touch.clientY)) {
       onDeleteItem(dragItem);
     }
     setDragItem(null);
@@ -332,10 +542,48 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={() => { setDragItem(null); setRotatingItem(null); setResizingItem(null); setIsOverTrash(false); setInitialAngle(0); setStartRotation(0); }}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={(e) => {
+        setCurrentPendingTouchItem(null);
+        handleTouchEnd(e);
+      }}
+      onTouchStart={(e) => {
+        // If touching empty board area and we have a pending item, place it
+        if (currentPendingTouchItem && e.touches.length === 1 && containerRef.current) {
+          const touch = e.touches[0];
+          const containerRect = containerRef.current.getBoundingClientRect();
+          const relativeX = touch.clientX - containerRect.left;
+          const relativeY = touch.clientY - containerRect.top;
+          
+          // Check if touch is on an existing item
+          const touchTarget = e.target as HTMLElement;
+          const isOnItem = touchTarget.closest('[data-item-id]');
+          
+          if (!isOnItem) {
+            // Place the pending item
+            if (currentPendingTouchItem.type === 'image' && onDropImage) {
+              onDropImage(currentPendingTouchItem.data, relativeX - 100, relativeY - 100);
+            } else if (currentPendingTouchItem.type === 'sticker' && onDropSticker) {
+              onDropSticker(currentPendingTouchItem.data, relativeX - 30, relativeY - 30);
+            } else if (currentPendingTouchItem.type === 'note' && onDropNote) {
+              const noteData = currentPendingTouchItem.data;
+              onDropNote(noteData.text || 'write here...', noteData.color || 'default', noteData.font, noteData.fontWeight, noteData.letterSpacing, noteData.isItalic, noteData.isUnderline, noteData.textColor, relativeX - 110, relativeY - 40);
+            } else if (currentPendingTouchItem.type === 'text' && onDropText) {
+              const textData = currentPendingTouchItem.data;
+              onDropText(textData.text || 'text', textData.font, textData.fontWeight, textData.isItalic, textData.isUnderline, textData.textColor, relativeX - 100, relativeY - 15);
+            }
+            setCurrentPendingTouchItem(null);
+            setTouchStartTime(Date.now());
+            setTouchStartPos({ x: touch.clientX, y: touch.clientY });
+          }
+        }
+      }}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
+      style={{ touchAction: 'none' }}
     >
       {/* Board Items */}
       {items.map((item) => (
@@ -353,8 +601,10 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
             width: item.width,
             transform: `rotate(${item.rotation || 0}deg)`,
             transformOrigin: 'center center',
+            touchAction: 'none',
           }}
           onMouseDown={(e) => handleMouseDown(item.id, e)}
+          onTouchStart={(e) => handleTouchStart(item.id, e)}
           onMouseEnter={() => setHoveredItem(item.id)}
           onMouseLeave={() => setHoveredItem(null)}
         >
@@ -366,6 +616,8 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
                 <div
                   className="absolute -top-10 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab z-50"
                   onMouseDown={(e) => handleRotateStart(item.id, e)}
+                  onTouchStart={(e) => handleRotateStart(item.id, e)}
+                  style={{ touchAction: 'none' }}
                 >
                   <div className="w-7 h-7 rounded-full bg-blue-500 border-2 border-white shadow-lg flex items-center justify-center hover:bg-blue-600 hover:scale-110 transition-all">
                     <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -390,6 +642,8 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
                 <div
                   className="absolute -bottom-3 -right-3 w-7 h-7 bg-green-500 hover:bg-green-600 rounded-full shadow-lg flex items-center justify-center z-50 cursor-se-resize transition-all hover:scale-110"
                   onMouseDown={(e) => handleResizeStart(item.id, e)}
+                  onTouchStart={(e) => handleResizeStart(item.id, e)}
+                  style={{ touchAction: 'none' }}
                 >
                   <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="M4 20h16M20 4v16M4 4l16 16" strokeLinecap="round" strokeLinejoin="round"/>
@@ -416,6 +670,8 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
                 <div
                   className="absolute -top-10 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab z-50"
                   onMouseDown={(e) => handleRotateStart(item.id, e)}
+                  onTouchStart={(e) => handleRotateStart(item.id, e)}
+                  style={{ touchAction: 'none' }}
                 >
                   <div className="w-7 h-7 rounded-full bg-blue-500 border-2 border-white shadow-lg flex items-center justify-center hover:bg-blue-600 hover:scale-110 transition-all">
                     <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -464,6 +720,8 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
                 <div
                   className="absolute -top-10 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab z-50"
                   onMouseDown={(e) => handleRotateStart(item.id, e)}
+                  onTouchStart={(e) => handleRotateStart(item.id, e)}
+                  style={{ touchAction: 'none' }}
                 >
                   <div className="w-7 h-7 rounded-full bg-blue-500 border-2 border-white shadow-lg flex items-center justify-center hover:bg-blue-600 hover:scale-110 transition-all">
                     <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -509,6 +767,8 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
                 <div
                   className="absolute -top-10 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab z-50"
                   onMouseDown={(e) => handleRotateStart(item.id, e)}
+                  onTouchStart={(e) => handleRotateStart(item.id, e)}
+                  style={{ touchAction: 'none' }}
                 >
                   <div className="w-7 h-7 rounded-full bg-blue-500 border-2 border-white shadow-lg flex items-center justify-center hover:bg-blue-600 hover:scale-110 transition-all">
                     <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -533,6 +793,8 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
                 <div
                   className="absolute -bottom-3 -right-3 w-7 h-7 bg-green-500 hover:bg-green-600 rounded-full shadow-lg flex items-center justify-center z-50 cursor-se-resize transition-all hover:scale-110"
                   onMouseDown={(e) => handleResizeStart(item.id, e)}
+                  onTouchStart={(e) => handleResizeStart(item.id, e)}
+                  style={{ touchAction: 'none' }}
                 >
                   <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="M4 20h16M20 4v16M4 4l16 16" strokeLinecap="round" strokeLinejoin="round"/>
@@ -564,6 +826,8 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
                 <div
                   className="absolute -top-10 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab z-50"
                   onMouseDown={(e) => handleRotateStart(item.id, e)}
+                  onTouchStart={(e) => handleRotateStart(item.id, e)}
+                  style={{ touchAction: 'none' }}
                 >
                   <div className="w-7 h-7 rounded-full bg-blue-500 border-2 border-white shadow-lg flex items-center justify-center hover:bg-blue-600 hover:scale-110 transition-all">
                     <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -589,6 +853,8 @@ const BoardView: React.FC<BoardViewProps> = ({ items, onUpdateItem, onDeleteItem
                 <div
                   className="absolute -bottom-3 -right-3 w-7 h-7 bg-green-500 hover:bg-green-600 rounded-full shadow-lg flex items-center justify-center z-50 cursor-se-resize transition-all hover:scale-110"
                   onMouseDown={(e) => handleResizeStart(item.id, e)}
+                  onTouchStart={(e) => handleResizeStart(item.id, e)}
+                  style={{ touchAction: 'none' }}
                 >
                   <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                     <path d="M4 20h16M20 4v16M4 4l16 16" strokeLinecap="round" strokeLinejoin="round"/>
